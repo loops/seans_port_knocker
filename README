@@ -15,6 +15,11 @@ after a timeout.
 The knock port is hardcoded to be 9999.  But you can change the
 "2209" below, to whatever port you want, as the one to be opened.
 
+One thing to note, the client includes the time in the knock packet,
+and the server rejects any packet which isn't within 2 secons of its
+own time.  So client and server pretty much need to be syncing their
+clocks to a time server.
+
 PREPARE:
 
   To generate the common 256-bit, base64 encoded, systemtric key that
