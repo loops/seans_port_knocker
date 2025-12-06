@@ -1,0 +1,24 @@
+[Unit]
+Description=Listen for ipv4 and ipv6 authorized port knocks
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/tmp
+
+Environment=PORT=9999
+SetCredentialEncrypted=CHACHA20_KEY: \
+    Whxqht+dQJax1aZeCGLxmiAAAAABAAAADAAAABAAAACprdQLVCxzBie3rgAAAAAAvRuq8 \
+    TiPT23JVFpjPOFH219f8LdKleuqyoZZEkozksZ8/GNf+159Sclkkiqj6wZa8CD4BmEYSG \
+    wBaZOE26WkJFM9GuweSZa8rXNlABNGBNT8bizH7p+7ZqCFGpr7
+    
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ExecStart=/usr/bin/python3 -u /usr/local/libexec/seans_port_knocker.py
+Restart=on-failure
+
+StandardOutput=journal
+StandardError=journal
+StandardInput=null
+
+[Install]
+WantedBy=multi-user.target

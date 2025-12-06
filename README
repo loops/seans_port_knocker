@@ -1,0 +1,104 @@
+Sean's Port Knocker
+-------------------
+
+Because fwknop hasn't added ipv6 support yet...  This is very simple,
+it doesn't have many features. It doesn't encode the client IP in the
+port-knock packet (so is vulnerable to a MITM).  But really, all this
+is meant to do is to stop the ssh port from being open to drive-by
+login attempts. It's ssh itself that provides the real security.
+
+Uses a 32 byte (256 bit) symmetric key to authenticate a valid knock.
+
+Expects firewalld to handle the actual port opening and closing
+after a timeout.
+
+The knock port is hardcoded to be 9999.  But you can change the
+"2209" below, to whatever port you want, as the one to be opened.
+
+PREPARE:
+
+  To generate the common 256-bit, base64 encoded, systemtric key that
+  you'll use on both the client and server:
+
+    Use wireguard:
+      wg genkey
+
+    Or SSL:
+      openssl rand -base64 32
+
+SERVER INSTALL:
+
+  Install the source files:
+    put  seans_port_knocker.py into /usr/local/libexec/
+    put  seans_port_knocker.service into /etc/systemd/system/
+    put  spk.xml into /etc/firewalld/services/
+
+  Open the port up to list for knocks (udp/999), change "FedoraServer" to real zone:
+    firewall-cmd --reload
+    firewall-cmd --permanent --zone=FedoraServer --add-service=spk
+    firewall-cmd --reload
+
+  Modify the service file so that it has the correct symetric key. You
+  must run this on the server, since systemd encryption is tied to host:
+
+    Paste the base64 encoded key into this command's stdin:
+      systemd-creds encrypt --name=CHACHA20_KEY -p - - | xclip
+
+    Then edit the /etc/systemd/system/seans_port_knocker.service,
+    Paste the lines grabbed by xclip above into the [service] section,
+    something like:
+
+      SetCredentialEncrypted=CHACHA20_KEY: \
+        Whxqht+dQJax1aZeCGLxmiAAAAABAAAADAAAABAAAADb5UMGXI2fjcjbchYAAAAAZrVij \
+        YgTTh5+Qv0TEghczDanWRWZp3T5dUKpycfAMk5DoTZSf87TUSTM7wK8kzfWI23zUWrPX2 \
+        3Ga+uuM6eR+69n/+4WUqG9MejdrzSZAhcjsoBmWqWemvvm+ROq
+
+  Create a couple of firewall sets, that automatically expire entries:
+      firewall-cmd --permanent --new-ipset=sshknock4 \
+        --type=hash:ip --family=inet --option=timeout=30
+      firewall-cmd --permanent --new-ipset=sshknock6 \
+        --type=hash:ip --family=inet6 --option=timeout=30
+
+  You can make sure they appear okay:
+      firewall-cmd --reload
+      nft list sets
+
+  create a couple rich rules:
+      firewall-cmd --add-rich-rule='rule family="ipv6" \
+	source ipset=sshknock6 port port="2209" protocol="tcp" accept'
+      firewall-cmd --add-rich-rule='rule family="ipv4" \
+	source ipset=sshknock4 port port="2209" protocol="tcp" accept'
+
+  You can make sure it's all configured with:
+      firewall-cmd --list-all
+      nft --set=sshknock6 --add-entry="2601::"
+      nft list sets
+
+  Enable the daemon:
+      systemctl daemon-reload
+      systemctl enable --now seans_port_knocker
+
+  Make sure it started:
+      systemctl status seans_port_knocker
+
+CLIENT INSTALL:
+
+  Create the Gnome Keyring entry to hold the symmetric base64 encoded key:
+
+    Run:
+      secret-tool store --label="Sean's Port Knocker" service seans-port-knocker username universal 
+
+    Then paste the generated key into it, followed by ctrl-d ctrl-d:
+      IEysXPIUNOmGrA23RNgrOWG4yuv1lCKwmWkIJd1cI3M=<ctrl-d><ctrl-d>
+
+  You can use the Seahorse application to take a look that the entry has been saved:
+    seahorse
+
+  Install the source files:
+    put  spk  into your user ~/bin/
+
+  Test it
+    nc <remote host> 2209     # will fail
+    spk <remote host>
+    nc <remote host> 2209     # sould show you the ssh login header
+

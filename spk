@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+import sys, os, base64, socket, random, struct, time, zlib, ipaddress, keyring
+from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+KEY_B64 = keyring.get_password("seans-port-knocker", "universal")
+KEY = base64.b64decode(KEY_B64)
+aead = ChaCha20Poly1305(KEY)
+
+def resolve_hostname_all(hostname):
+    # Use AF_UNSPEC to ask for both IPv4 and IPv6 addresses
+    try:
+        results = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        addresses = set()
+        for family, socktype, proto, canonname, sockaddr in results:
+            addresses.add(sockaddr[0])
+        return list(addresses)
+        
+    except socket.gaierror:
+        print(f"Error: Could not resolve hostname '{hostname}'.")
+        return []
+
+def decode_addr(target):
+    address = resolve_hostname_all(target)[0]
+    ip = ipaddress.ip_address(address)
+    if ip.version == 4:
+        protocol = "ipv4"
+    elif ip.version == 6:
+        if ip.ipv4_mapped:
+            protocol = "ipv4"
+            address = ip.ipv4_mapped
+        else:
+            protocol = "ipv6"
+    else:
+        raise ValueError("Unknown IP protocol")
+    return protocol, address
+
+def create_message(port: int) -> bytes:
+    total_len = 255
+
+    # choose random offsets (avoid overlap)
+    sec_offset = random.randint(2, total_len - 4)
+    port_offset = random.randint(2, total_len - 2)
+    while abs(sec_offset - port_offset) < 4:
+        port_offset = random.randint(2, total_len - 2)
+
+    # header: 1 byte each for offsets
+    header = struct.pack("BB", sec_offset, port_offset)
+
+    # body: random filler
+    body = bytearray(os.urandom(total_len - len(header)))
+
+    # insert seconds since epoch (Unix time, 4 bytes)
+    seconds = int(time.time())
+    body[sec_offset-2:sec_offset+2] = struct.pack("!I", seconds)
+
+    # insert port (2 bytes)
+    body[port_offset-2:port_offset] = struct.pack("!H", port)
+
+    payload = header + body
+    checksum = zlib.crc32(payload) & 0xFFFFFFFF
+    return payload + struct.pack("!I", checksum)
+
+
+KNOCK_PORT=9999
+msg = create_message(KNOCK_PORT)
+aad = b"seans-port-knocker-v1"   # Associated Data (must match receiver)
+nonce = os.urandom(12)
+ct = aead.encrypt(nonce, msg, aad)
+pkt = nonce + ct
+
+try:
+    protocol, address = decode_addr(sys.argv[1])
+    if protocol == 'ipv4':
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.sendto(pkt, (address, KNOCK_PORT))
+        print(f"{protocol} Packet sent.")
+    elif protocol == 'ipv6':
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.sendto(pkt, (address, KNOCK_PORT))
+        print(f"{protocol} Packet sent.")
+    else:
+        print("failure...")
+    time.sleep(1)
+except:
+    print("Uknown target...")

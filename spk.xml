@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>spk</short>
+  <description>Sean's Port Knocker</description>
+  <port protocol="udp" port="9999"/>
+</service>
